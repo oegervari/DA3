@@ -19,7 +19,8 @@ data <- data %>% mutate(female=as.numeric(sex==2)) %>%
 ###### plots #####
 
 ggplot(data, aes(w)) +
-  geom_histogram(aes(color = female))
+  geom_histogram(aes(color = female)) +
+  labs(x = "Hourly wage (US dollars)")
 
 ggplot(data, aes(age, w)) +
   geom_point() +
