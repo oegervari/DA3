@@ -8,9 +8,9 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-#knitr::opts_chunk$set(fig.pos = "!H", out.extra = "")
+knitr::opts_chunk$set(fig.pos = "!H", out.extra = "")
 # Set graph size
-#knitr::opts_chunk$set(echo = FALSE, out.width = "50%" )#fig.asp = 0.5, fig.width = 7, out.width = "90%" )
+knitr::opts_chunk$set(echo = FALSE, out.width = "50%" )#fig.asp = 0.5, fig.width = 7, out.width = "90%" )
 rm(list=ls())
 # Libraries
 library(tidyverse)
@@ -18,7 +18,8 @@ library(fixest)
 library(caret)
 library(modelsummary)
 library(grid)
-# Get the data
+library(kableExtra)
+# Getting the data
 data <- read.csv( 'https://osf.io/4ay9x/download', stringsAsFactors = TRUE)
 ```
 
@@ -29,55 +30,40 @@ In this report I showcase 4 models, that predict the earnings per hour of Educat
 
 ## Data
 
-The Massachusetts data are ...
-Further information is available (here)[<https://www.rdocumentation.org/packages/AER/versions/1.2-9/topics/MASchools>].
-
-ECT.
+The used for the report is the [cps-earnings dataset](https://osf.io/4ay9x/).
+As mentioned above, I chose the Educational Administrators (occupational code 0230) [occupation](https://osf.io/57n9q/) for the prediction. 
 
 
 ```{r, echo=FALSE}
-# Sample selection
-df <- df %>% select( score4 , stratio, english, 
-                     income, scratio, exptot, special,
-                     lunch, salary ) %>% drop_na()
-P95 <- function(x){quantile(x,0.95,na.rm=T)}
-P05 <- function(x){quantile(x,0.05,na.rm=T)}
-datasummary( (`Overall Grade` = score4 ) + 
-             (`Student to teacher ratio` = stratio ) + 
-             (`Percent of english learner` = english ) + 
-             (`Income per capita` = income) + 
-             (`Student to computer ratio` = scratio) + 
-             (`Total Expenditure ($)` = exptot) + 
-             (`Special education students (%)` = special )+
-             (`Percent qualifying for reduced-price lunch` = lunch ) +
-             (`Average teacher hourly wage ($)` = salary ) ~
-             Mean + Median + SD + Min + Max + P05 + P95 , 
-             data = df ,
-             title = 'Descriptive statistics') %>% 
-      kable_styling(latex_options = c("HOLD_position","scale_down"))
+# selecting occupation 230 - Education administrators
+data <- data %>% filter(occ2012 == 230)
+
+##### adding variables ####
+data <- data %>% mutate(female=as.numeric(sex==2)) %>%
+  mutate(w=earnwke/uhours) %>%
+  mutate(agesq=age^2) %>% 
+  mutate(unionmember=ifelse(unionmme=='Yes',1,0))
 ```
 
-The number of observations is `r sum(!is.na(df$score4))` for all of our key variables.
-
-DESCRIPTION OF THE SUMMARY STATS: WHAT CAN WE LEARN FROM THEM?
-
-As the focus is the price difference, the next Figure shows the histogram for this variable.
+The number of observations is `r sum(!is.na(data$X))` for all of our key variables.
 
 ```{r, echo=FALSE, warning=FALSE, fig.width=8, fig.height = 3, fig.align="center" }
-# score 4
-p1 <- ggplot( df , aes(x = score4)) +
-  geom_histogram( binwidth = 5, fill='navyblue', color = 'white' ) +
-  labs(y = 'Count',x = "Averaged values of test scores for schools") +
-  theme_bw()
-# stratio
-p2 <- ggplot( df , aes(x = stratio)) +
-  geom_histogram(binwidth = 0.5,fill='navyblue', color = 'white' ) +
-  labs(y = 'Count',x = "Student to teacher ratio") +
-  theme_bw()
-association_figs <- ggarrange(p1, p2,
-                       hjust = -0.6,
-                       ncol = 2, nrow = 1)
-association_figs
+# Linear regressions
+model1 <- as.formula(w ~ age + agesq)
+model2 <- as.formula(w ~ age + agesq + female)
+model3 <- as.formula(w ~ age + agesq + female + grade92)
+model4 <- as.formula(w ~ age + agesq + female + grade92 + unionmember + marital + ownchild)
+
+# Running simple OLS
+reg1 <- feols(model1, data=data, vcov = 'hetero')
+reg2 <- feols(model2, data=data, vcov = 'hetero')
+reg3 <- feols(model3, data=data, vcov = 'hetero')
+reg4 <- feols(model4, data=data, vcov = 'hetero')
+
+# evaluation of the models
+fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")
+etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('bic','rmse','n','k') )
+
 ```
 
 DESCRIPTION OF THE FIGURE. WHAT DOES IT TELS US?
