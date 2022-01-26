@@ -1,5 +1,5 @@
 ---
-title: "DA3 - HW1"
+title: "DA3 - Assignment 1"
 author: "Oszkar Egervari"
 date: "1/26/2022"
 output: 
@@ -25,12 +25,12 @@ data <- read.csv( 'https://osf.io/4ay9x/download', stringsAsFactors = TRUE)
 
 ## Introduction
 
-In this report I showcase 4 models, that predict the earnings per hour of Educational Administrators (occupational code 0230). The models have different levels of complexity, model 1 being the most simple, while model 4 contains the most predictor variables. The aim of this report is to find the model with the best performance based on RMSE in full sample, cross-validated RMSE and BIC in full sample. 
+In this report I showcase four models, that predict the earnings per hour of Educational Administrators (occupational code 0230). The models have different levels of complexity, model 1 being the most simple, while model 4 contains the most predictor variables. The aim of this report is to find the model with the best performance based on RMSE in full sample, cross-validated RMSE and BIC in full sample. 
 
 
 ## Data
 
-The used for the report is the [cps-earnings dataset](https://osf.io/4ay9x/).
+The data used for the report is the [cps-earnings dataset](https://osf.io/4ay9x/).
 As mentioned above, I chose the Educational Administrators (occupational code 0230) [occupation](https://osf.io/57n9q/) for the prediction. 
 
 
@@ -116,11 +116,10 @@ kable( cv_mat,
        caption = 'Hourly wage models estimated and evaluated using 5-fold cross-validation and RMSE') %>% kable_styling(font_size = 2, latex_options = c("hold_position","scale_down"))
 ```
 
-On table 2 we can see the cross-validated RMSE for the four models. Here Model 3 (13.52444) has a slightly lower RMSE than Model 4 (13.54168). All these values are close, in which case it is advised to choose the more simple model, as it may help us avoid overfitting the live data. 
-In this case that would mean choosing Model 3. 
+On table 2 we can see the cross-validated RMSE for the four models. Here Model 3 (13.52444) has a slightly lower RMSE than Model 4 (13.54168). All these values are close, in which case it is advised to choose the more simple model, as it may help us avoid overfitting the live data. In this case that would mean choosing Model 3. The relationship between the increasing number of prediction variables and lower RMSE is displayed on Figure 1. 
 
 
-```{r, echo = FALSE, warning=FALSE, fig.width=4, fig.height = 3, fig.align="center" }
+```{r, echo = FALSE, warning=FALSE, fig.width=5, fig.height = 3, fig.align="center" }
 # Show model complexity and out-of-sample RMSE performance
 m_comp <- c()
 models <- c("reg1", "reg2", "reg3", "reg4")
@@ -133,16 +132,16 @@ m_comp <- tibble( model = models ,
                   RMSE = rmse_cv )
 
 ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
-  geom_point(color='red',size=2) +
-  geom_line(color='blue',size=0.5)+
+  geom_line(color='gray',size=0.5) +
+  geom_point(color='purple',size=1) +
   labs(x='Number of explanatory variables',y='Averaged RMSE on test samples',
-       title='Prediction performance and model compexity') +
+       title='Figure 1: Prediction performance and model compexity') +
   theme_bw()
 ```
 
 ## Conclusion
 
-By increasing the number of the predictor variables, we were able to achieve lower BIC and RMSE to a certain point, so Model 3 and 4 produced similar scores. In which case it is advised to choose the less complex model, that way we lower the chance of overfitting on the live data.
+By increasing the number of the predictor variables, lower BIC and RMSE were achieved to a certain point, Model 3 and 4 produced similar scores. In which case it is advised to choose the less complex model, that way the chance of overfitting on the live data is lower.
 
 
 
