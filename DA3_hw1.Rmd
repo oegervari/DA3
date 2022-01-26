@@ -52,7 +52,7 @@ The number of observations is `r sum(!is.na(data$X))` for all of our key variabl
 model1 <- as.formula(w ~ age + agesq)
 model2 <- as.formula(w ~ age + agesq + female)
 model3 <- as.formula(w ~ age + agesq + female + grade92)
-model4 <- as.formula(w ~ age + agesq + female + grade92 + unionmember + marital + ownchild)
+model4 <- as.formula(w ~ age + agesq + female + grade92 + unionmember + ownchild)
 
 # Running simple OLS
 reg1 <- feols(model1, data=data, vcov = 'hetero')
@@ -63,17 +63,17 @@ reg4 <- feols(model4, data=data, vcov = 'hetero')
 # evaluation of the models
 fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")
 kable( etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('bic','rmse','n','k') ),
-        col.names = c('(1)','(2)','(3)','(4)'),
+        col.names = c('Model 1','Model 2','Model 3','Model 4'),
        "latex", booktabs = TRUE,  position = "H",
        caption = 'Evaluation of the models') %>% kable_styling(latex_options = c("hold_position","scale_down"))
 
 ```
 
-DESCRIPTION OF THE FIGURE. WHAT DOES IT TELS US?
+As seen on table 1, Model 1 has only age and age square as predictor variables. I chose the square of age to model the potential non-linearity. For Model 2 I added the female binary variable, then the level of education, and finally for Model 4 I added the union member binary variable and the number of children.
 
-(May change the order of descriptive stats and graph.)
+Interpreting the coefficients, we can see that age is positively related to hourly wage in a concave fashion. The female binary variable is negative, meaning females are expected to earn less, meanwhile the union member binary variable and educational level variable are positive, so both union members and people with higher levels of education are expected to earn more.
 
-The key pattern of association is:
+Model 3 has the lowest BIC (7,791.1), closely followed by Model 4 (7,804.7), while Model 4 has a slightly lower RMSE (13.361) than Model 3 (13.409) as for RMSE in the full sample.
 
 ```{r, echo=FALSE}
 ####### Cross-validation ########
@@ -110,15 +110,14 @@ cv_mat <- data.frame(rbind(cv1$resample[4], "Average"),
 )
 
 colnames(cv_mat)<-c("Resample","Model1", "Model2", "Model3", "Model4")
-cv_mat 
 
+kable( cv_mat,
+       "latex", booktabs = TRUE,  position = "H",
+       caption = 'Hourly wage models estimated and evaluated using 5-fold cross-validation and RMSE') %>% kable_styling(font_size = 2, latex_options = c("hold_position","scale_down"))
 ```
 
-How will you include this in your model?
-
-Short description on the other variables: 2-10 sentence depends on the amount of variables you have. You should reference your decisions on the graphs/analysis which are located in the appendix.
-
-## Model
+On table 2 we can see the cross-validated RMSE for the four models. Here Model 3 (13.52444) has a slightly lower RMSE than Model 4 (13.54168). All these values are close, in which case it is advised to choose the more simple model, as it may help us avoid overfitting the live data. 
+In this case that would mean choosing Model 3. 
 
 
 ```{r, echo = FALSE, warning=FALSE, fig.width=4, fig.height = 3, fig.align="center" }
@@ -141,21 +140,12 @@ ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
   theme_bw()
 ```
 
-
-
-
-
-
-## Robustness check / 'Heterogeneity analysis'
-
-Task: calculate and report t-tests for each countries. 
-
-
-
 ## Conclusion
 
-HERE COMES WHAT WE HAVE LEARNED AND WHAT WOULD STRENGHTEN AND WEAKEN OUR ANALYSIS.
+By increasing the number of the predictor variables, we were able to achieve lower BIC and RMSE to a certain point, so Model 3 and 4 produced similar scores. In which case it is advised to choose the less complex model, that way we lower the chance of overfitting on the live data.
 
-## Appendix
 
-Here comes all the results which are referenced and not essential for understanding the MAIN results.
+
+
+
+
