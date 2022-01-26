@@ -62,7 +62,10 @@ reg4 <- feols(model4, data=data, vcov = 'hetero')
 
 # evaluation of the models
 fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")
-etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('bic','rmse','n','k') )
+kable( etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('bic','rmse','n','k') ),
+        col.names = c('(1)','(2)','(3)','(4)'),
+       "latex", booktabs = TRUE,  position = "H",
+       caption = 'Evaluation of the models') %>% kable_styling(latex_options = c("hold_position","scale_down"))
 
 ```
 
@@ -72,16 +75,43 @@ DESCRIPTION OF THE FIGURE. WHAT DOES IT TELS US?
 
 The key pattern of association is:
 
-```{r, echo=FALSE, warning=FALSE, fig.width=4, fig.height = 3, fig.align="center" }
-chck_sp <- function( x_var , x_lab ){
-  ggplot( df , aes(x = x_var, y = score4)) +
-    geom_point(color='red',size=2,alpha=0.6) +
-    geom_smooth(method="loess" , formula = y ~ x )+
-    labs(x = x_lab, y = "Averaged values of test scores") +
-    theme_bw()
+```{r, echo=FALSE}
+####### Cross-validation ########
+
+# Setting number of fold
+k <- 5
+
+set.seed(43502)
+cv1 <- train(model1, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv2 <- train(model2, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv3 <- train(model3, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv4 <- train(model4, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+
+# Calculating RMSE for each fold and the average RMSE as well
+cv <- c("cv1", "cv2", "cv3", "cv4")
+rmse_cv <- c()
+
+for(i in 1:length(cv)){
+  rmse_cv[i] <- sqrt((get(cv[i])$resample[[1]][1]^2 +
+                        get(cv[i])$resample[[1]][2]^2 +
+                        get(cv[i])$resample[[1]][3]^2 +
+                        get(cv[i])$resample[[1]][4]^2)/4)
 }
-# Our main interest: student-to-teacher ratio:
-chck_sp(df$stratio,'Student-to-teacher ratio')
+
+# summarize results
+cv_mat <- data.frame(rbind(cv1$resample[4], "Average"),
+                     rbind(cv1$resample[1], rmse_cv[1]),
+                     rbind(cv2$resample[1], rmse_cv[2]),
+                     rbind(cv3$resample[1], rmse_cv[3]),
+                     rbind(cv4$resample[1], rmse_cv[4])
+)
+
+colnames(cv_mat)<-c("Resample","Model1", "Model2", "Model3", "Model4")
+cv_mat 
+
 ```
 
 How will you include this in your model?
@@ -91,77 +121,26 @@ Short description on the other variables: 2-10 sentence depends on the amount of
 ## Model
 
 
-```{r, echo = FALSE }
-# reg1: NO control, simple linear regression
-reg1 <- feols( score4 ~ stratio , data = df , vcov = 'hetero' )
-# reg2: NO controls, use piecewise linear spline(P.L.S) with a knot at 18
-reg2 <- feols( score4 ~ lspline( stratio , 18 ) , data = df , vcov = 'hetero' )
-# reg3: control for english learners dummy (english_d) only. 
-#   Is your parameter different? Is it a confounder?
-df <- df %>% mutate( english_d = 1*(english>1))
-reg3 <- feols( score4 ~ lspline( stratio , 18 ) + english_d, data = df , vcov = 'hetero' )
-##
-# reg4: reg3 + Schools' special students measures (lunch with P.L.S, knot: 15; and special)
-reg4 <- feols( score4 ~ lspline( stratio , 18 ) + english_d 
-                   + lspline(lunch,15) + special , data = df , vcov = 'hetero' )
-#
-# reg5: reg4 + salary with P.L.S, knots at 35 and 40, exptot, log of income and scratio
-reg5 <- feols( score4 ~ lspline( stratio , 18 ) + english_d
-                   + lspline(lunch,15) + special 
-                   + lspline(salary,c(35,40)) + exptot 
-                   + log( income ) + scratio , data = df , vcov = 'hetero' )
-# Naming the coefficients for pretty output
-alpha  <- round( reg5$coeftable[1,1] , 2 )
-b1 <- round( reg5$coeftable[2,1] , 2 )
-b2 <- round( reg5$coeftable[3,1] , 2 )
+```{r, echo = FALSE, warning=FALSE, fig.width=4, fig.height = 3, fig.align="center" }
+# Show model complexity and out-of-sample RMSE performance
+m_comp <- c()
+models <- c("reg1", "reg2", "reg3", "reg4")
+for( i in 1 : length(cv) ){
+  m_comp[ i ] <- length( get( models[i] )$coefficient  - 1 ) 
+}
+
+m_comp <- tibble( model = models , 
+                  complexity = m_comp,
+                  RMSE = rmse_cv )
+
+ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
+  geom_point(color='red',size=2) +
+  geom_line(color='blue',size=0.5)+
+  labs(x='Number of explanatory variables',y='Averaged RMSE on test samples',
+       title='Prediction performance and model compexity') +
+  theme_bw()
 ```
 
-My preferred model is:
-
-score = $`r alpha`$ $`r b1`$ $( student/teacher < 18)$ $`r b2`$ $( student/teacher \geq 18) + \delta Z$
-
-where $Z$ are standing for the controls, which includes controlling for english language, lunch, other special characteristics and wealth measures. From this model we can infer:
-
-- when every covariates are zero, students expected to have grade score of $`r alpha`$
-- when the student to teacher is one unit larger, but below the value of 18, we see students to have on average $`r abs(b1)`$ smaller grades.
-- when the student to teacher is one unit larger, with the value above or equal to 18, we see students to have on average $`r abs(b2)`$ smaller grades.
-
-However, based on the heteroskedastic robust standard errors, these results are statistically non different from zero. To show that, I have run a two-sided hypothesis test:
-$$H_0:=\beta_1 = 0$$
-$$H_A:=\beta_1 \neq 0$$
-I have the t-statistic as `r round( reg5$coeftable[2,3] , 2 )` and the p-value as `r round( reg5$coeftable[2,4] , 2 )`, which confirms my conclusion.
-
-We compare multiple models to learn about the stability of the parameters. Bla-bla:
-
-```{r, echo = FALSE }
-##
-# Summarize our findings:
-varname_report <- c("(Intercept)" = "Intercept",
-                   "stratio" = "student/teacher",
-                   "lspline(stratio,18)1" = "student/teacher (<18)",
-                   "lspline(stratio,18)2" = "student/teacher (>=18)",
-                   "english_d" = "english_dummy")
-groupConf <- list("English" = c("english"),
-                  "Lunch" = c("lunch"),
-              "Other Special" = c("special"),
-              "Wealth Measures" = c("exptot","income","scratio"))
-vars_omit <- c("english|lunch|special|salary|exptot|income|scratio")
-# Note: coefstat = 'confint' is just an example, usually you need to report se.
-style_noHeaders = style.tex(var.title = "", fixef.title = "", stats.title = " ")
-kable( etable( reg1 , reg2 , reg3 , reg4 , reg5 ,
-        title = 'Average test scores for 4th graders',
-        dict = varname_report,
-        drop = vars_omit ,
-        group = groupConf ,
-        se.below = T,
-        coefstat = 'se',
-        fitstat = c('n','r2'),
-        se.row = F,
-        depvar = F ) , 
-        col.names = c('(1)','(2)','(3)','(4)','(5)'),
-       "latex", booktabs = TRUE,  position = "H",
-       caption = 'Models to uncover relation between test score and student to teacher ratio') %>% kable_styling(latex_options = c("hold_position","scale_down"))
-```
 
 
 
