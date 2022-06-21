@@ -1,0 +1,151 @@
+---
+title: "DA3 - Assignment 1"
+author: "Oszkar Egervari"
+date: "1/26/2022"
+output: 
+  pdf_document:
+    extra_dependencies: ["float"]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.pos = "!H", out.extra = "")
+# Set graph size
+knitr::opts_chunk$set(echo = FALSE, out.width = "50%" )
+
+rm(list=ls())
+# Libraries
+library(tidyverse)
+library(fixest)
+library(caret)
+library(modelsummary)
+library(grid)
+library(kableExtra)
+# Getting the data
+data <- read.csv( 'https://osf.io/4ay9x/download', stringsAsFactors = TRUE)
+```
+
+## Introduction
+
+In this report I showcase four models, that predict the earnings per hour of Educational Administrators (occupational code 0230). The models have different levels of complexity, model 1 being the most simple, while model 4 contains the most predictor variables. The aim of this report is to find the model with the best performance based on RMSE in full sample, cross-validated RMSE and BIC in full sample. 
+
+
+## Data
+
+The data used for the report is the [cps-earnings dataset](https://osf.io/4ay9x/).
+As mentioned above, I chose the Educational Administrators (occupational code 0230) [occupation](https://osf.io/57n9q/) for the prediction. 
+
+
+```{r, echo=FALSE}
+# selecting occupation 230 - Education administrators
+data <- data %>% filter(occ2012 == 230)
+
+##### adding variables ####
+data <- data %>% mutate(female=as.numeric(sex==2)) %>%
+  mutate(w=earnwke/uhours) %>%
+  mutate(agesq=age^2) %>% 
+  mutate(unionmember=ifelse(unionmme=='Yes',1,0))
+```
+
+The number of observations is `r sum(!is.na(data$X))` for all of our key variables.
+
+```{r, echo=FALSE, warning=FALSE, fig.width=8, fig.height = 3, fig.align="center" }
+# Linear regressions
+model1 <- as.formula(w ~ age + agesq)
+model2 <- as.formula(w ~ age + agesq + female)
+model3 <- as.formula(w ~ age + agesq + female + grade92)
+model4 <- as.formula(w ~ age + agesq + female + grade92 + unionmember + ownchild)
+
+# Running simple OLS
+reg1 <- feols(model1, data=data, vcov = 'hetero')
+reg2 <- feols(model2, data=data, vcov = 'hetero')
+reg3 <- feols(model3, data=data, vcov = 'hetero')
+reg4 <- feols(model4, data=data, vcov = 'hetero')
+
+# evaluation of the models
+fitstat_register("k", function(x){length( x$coefficients ) - 1}, "No. Variables")
+kable( etable( reg1 , reg2 , reg3 , reg4 , fitstat = c('bic','rmse','n','k') ),
+        col.names = c('Model 1','Model 2','Model 3','Model 4'),
+       "latex", booktabs = TRUE,  position = "H",
+       caption = 'Evaluation of the models') %>% kable_styling(latex_options = c("hold_position","scale_down"))
+
+```
+
+As seen on table 1, Model 1 has only age and age square as predictor variables. I chose the square of age to model the potential non-linearity. For Model 2 I added the female binary variable, then the level of education, and finally for Model 4 I added the union member binary variable and the number of children.
+
+Interpreting the coefficients, we can see that age is positively related to hourly wage in a concave fashion. The female binary variable is negative, meaning females are expected to earn less, meanwhile the union member binary variable and educational level variable are positive, so both union members and people with higher levels of education are expected to earn more.
+
+Model 3 has the lowest BIC (7,791.1), closely followed by Model 4 (7,804.7), while Model 4 has a slightly lower RMSE (13.361) than Model 3 (13.409) as for RMSE in the full sample.
+
+```{r, echo=FALSE}
+####### Cross-validation ########
+
+# Setting number of fold
+k <- 5
+
+set.seed(43502)
+cv1 <- train(model1, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv2 <- train(model2, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv3 <- train(model3, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+set.seed(43502)
+cv4 <- train(model4, data, method = "lm", trControl = trainControl(method = "cv", number = k))
+
+# Calculating RMSE for each fold and the average RMSE as well
+cv <- c("cv1", "cv2", "cv3", "cv4")
+rmse_cv <- c()
+
+for(i in 1:length(cv)){
+  rmse_cv[i] <- sqrt((get(cv[i])$resample[[1]][1]^2 +
+                        get(cv[i])$resample[[1]][2]^2 +
+                        get(cv[i])$resample[[1]][3]^2 +
+                        get(cv[i])$resample[[1]][4]^2)/4)
+}
+
+# summarize results
+cv_mat <- data.frame(rbind(cv1$resample[4], "Average"),
+                     rbind(cv1$resample[1], rmse_cv[1]),
+                     rbind(cv2$resample[1], rmse_cv[2]),
+                     rbind(cv3$resample[1], rmse_cv[3]),
+                     rbind(cv4$resample[1], rmse_cv[4])
+)
+
+colnames(cv_mat)<-c("Resample","Model1", "Model2", "Model3", "Model4")
+
+kable( cv_mat,
+       "latex", booktabs = TRUE,  position = "H",
+       caption = 'Hourly wage models estimated and evaluated using 5-fold cross-validation and RMSE') %>% kable_styling(font_size = 2, latex_options = c("hold_position","scale_down"))
+```
+
+On table 2 we can see the cross-validated RMSE for the four models. Here Model 3 (13.52444) has a slightly lower RMSE than Model 4 (13.54168). All these values are close, in which case it is advised to choose the more simple model, as it may help us avoid overfitting the live data. In this case that would mean choosing Model 3. The relationship between the increasing number of prediction variables and lower RMSE is displayed on Figure 1. 
+
+
+```{r, echo = FALSE, warning=FALSE, fig.width=5, fig.height = 3, fig.align="center" }
+# Show model complexity and out-of-sample RMSE performance
+m_comp <- c()
+models <- c("reg1", "reg2", "reg3", "reg4")
+for( i in 1 : length(cv) ){
+  m_comp[ i ] <- length( get( models[i] )$coefficient  - 1 ) 
+}
+
+m_comp <- tibble( model = models , 
+                  complexity = m_comp,
+                  RMSE = rmse_cv )
+
+ggplot( m_comp , aes( x = complexity , y = RMSE ) ) +
+  geom_line(color='gray',size=0.5) +
+  geom_point(color='purple',size=1) +
+  labs(x='Number of explanatory variables',y='Averaged RMSE on test samples',
+       title='Figure 1: Prediction performance and model compexity') +
+  theme_bw()
+```
+
+## Conclusion
+
+By increasing the number of the predictor variables, lower BIC and RMSE were achieved to a certain point, Model 3 and 4 produced similar scores. In which case it is advised to choose the less complex model, that way the chance of overfitting on the live data is lower.
+
+
+
+
+
+
