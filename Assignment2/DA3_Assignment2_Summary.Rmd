@@ -1,0 +1,479 @@
+---
+title: "DA3 - Assignment 2 - Summary review"
+author: "Oszkar Egervari"
+date: "2/10/2022"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    extra_dependencies: float
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.pos = "!H", out.extra = "")
+# Set graph size
+knitr::opts_chunk$set(echo = FALSE, out.width = "50%" )
+
+rm(list=ls())
+
+library(tidyverse)
+library(caret)
+library(ranger)
+library(modelsummary)
+library(pdp)
+library(gbm)
+library(rattle)
+library(kableExtra)
+
+data <- read_csv('https://raw.githubusercontent.com/oegervari/da2_a2/main/airbnb_sandiego_prepped.csv') %>%
+  mutate_if(is.character, factor) %>%
+  filter(!is.na(price))
+
+to_filter <- sapply(data, function(x) sum(is.na(x)))
+to_filter[to_filter > 0]
+
+to_drop <- c("d_host_has_profile_pic", "d_host_identity_verified", "f_minimum_nights")
+data <- data %>%
+  select(-one_of(to_drop))
+```
+
+## Introduction
+
+In this report I build models, that predict the prices of Airbnb rentals in San Diego, USA.
+The first two models are linear regressions estimated by OLS and LASSO, I compare them with predictions from a single regression tree with CART, and a Random Forest model.
+The aim of this report is to find the model with the best performance based on RMSE.
+
+## Data
+
+The data used for the report is the [San Diego data from http://insideairbnb.com/](https://raw.githubusercontent.com/oegervari/da2_a2/main/airbnb_sandiego_prepped.csv). The data I've linked is already cleaned and prepared for the report.
+The number of observations is `r sum(!is.na(data$f_room_type))` for all of our key variables.
+
+
+```{r prep, echo=FALSE, warning=FALSE}
+# Sample definition and preparation ---------------------------------------
+
+# We focus on normal apartments, n<7
+data <- data %>% filter(n_accommodates < 7)
+data <- data %>% filter(n_accommodates > 1)
+data <- data %>% filter(f_property_type %in% c("Entire condominium (condo)", "Entire guest suite",
+                                       "Entire loft", "Entire rental unit", 
+                                       "Entire serviced apartment" ))
+
+# copy a variable - purpose later, see at variable importance
+data <- data %>% mutate(n_accommodates_copy = n_accommodates)
+
+# basic descr stat -------------------------------------------
+# skimr::skim(data)
+# datasummary(price~Mean+Median+Min+Max+P25+P75+N,data=data)
+# datasummary( f_room_type + f_property_type ~ N + Percent() , data = data )
+
+# create train and holdout samples -------------------------------------------
+# train is where we do it all, incl CV
+
+set.seed(1234)
+train_indices <- as.integer(createDataPartition(data$price, p = 0.7, list = FALSE))
+data_train <- data[train_indices, ]
+data_holdout <- data[-train_indices, ]
+
+# Check the number of observations
+# dim(data_train)
+# dim(data_holdout)
+
+# Define models: simpler -> extended -------------------
+
+# Basic Variables inc neighnourhood
+basic_vars <- c(
+  "n_accommodates", "n_beds", "n_days_since", "f_property_type",
+  "f_number_of_reviews ", "n_bathroom",
+  "neighbourhood_cleansed")
+
+# reviews
+reviews <- c("n_number_of_reviews", "flag_n_number_of_reviews" ,
+             "n_review_scores_rating", "flag_review_scores_rating",
+             "n_review_scores_cleanliness")
+
+# Dummy variables
+amenities <-  grep("^d_.*", names(data), value = TRUE)
+
+#interactions for the LASSO -------------
+# from ch14
+X1  <- c("n_accommodates*n_review_scores_rating",  "d_pool*n_accommodates",  "f_property_type*d_beachfront",
+         "d_air_conditioning*n_review_scores_rating", "d_beachfront*n_review_scores_rating", "d_host_is_superhost*n_review_scores_rating")
+# with boroughs
+X2  <- c("f_property_type*neighbourhood_cleansed", "d_pool*neighbourhood_cleansed",
+         "n_accommodates*neighbourhood_cleansed" )
+
+predictors_1 <- c(basic_vars)
+predictors_2 <- c(basic_vars, reviews, amenities)
+predictors_E <- c(basic_vars, reviews, amenities, X1,X2)
+```
+
+This report is aimed to predict rental units that accommodate 2-6 people per night. After the necessary filtering, we are left with `r sum(!is.na(data$f_room_type))` observations. The distribution of price can be found in the appendix.
+
+Before building the models, we split the data into train and holdout sets. The models are built using the train set, while the holdout set is reserved for the final test. The dimensions of the two sets can be found in the appendix.
+
+The last step before the modelbuilding is determining the variables. It's done in four groups, first is the basic variables, next the review related variables, the third is amenities, which are all binary variables, the last is creating interactions for LASSO. Out of these groups are created three predictors. The variables and the predictors can be found in the appendix. 
+
+## Building Random Forest models
+
+With the 5 fold cross-validation is set for the train set, two random forest models are built. The simpler one uses the first set of predictors (containing only the basic variables), the more complex one uses the second set of predictors (containing the review related and amenity variables on top of the basic ones). The RMSE of the two models can be seen below, the whole results table can be found in the appendix.
+
+```{r rf, echo=FALSE, warning=FALSE, fig.width=8, fig.height = 3, fig.align="center" }
+# RANDOM FORESTS -------------------------------------------------------
+
+# do 5-fold CV
+train_control <- trainControl(method = "cv",
+                              number = 5,
+                              verboseIter = FALSE)
+
+# set tuning
+tune_grid <- expand.grid(
+  .mtry = c(8),
+  .splitrule = "variance",
+  .min.node.size = c(50)
+)
+
+# simpler model for model - using random forest
+# set.seed(1337)
+# system.time({
+#   rf_model_1 <- train(
+#     formula(paste0("price ~", paste0(predictors_1, collapse = " + "))),
+#     data = data_train,
+#     method = "ranger",
+#     trControl = train_control,
+#     tuneGrid = tune_grid,
+#     importance = "impurity"
+#   )
+# })
+load(url('https://github.com/oegervari/da3_a2/blob/main/rf_model_1.RData?raw=true'))
+
+
+# more complicated model - using random forest
+# set.seed(1337)
+# system.time({
+#   rf_model_2 <- train(
+#     formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+#     data = data_train,
+#     method = "ranger",
+#     trControl = train_control,
+#     tuneGrid = tune_grid,
+#     importance = "impurity"
+#   )
+# })
+load(url('https://github.com/oegervari/da3_a2/blob/main/rf_model_2.RData?raw=true'))
+
+
+# auto tuning first - just takes too much time...
+# set.seed(1337)
+# system.time({
+#   rf_model_2auto <- train(
+#     formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+#     data = data_train,
+#     method = "ranger",
+#     trControl = train_control,
+#     importance = "impurity"
+#   )
+# })
+# rf_model_2auto
+# load(url('https://github.com/regulyagoston/BA21_Coding/blob/main/Class_3/data/rf_model_2.RData?raw=true'))
+
+
+# evaluate random forests -------------------------------------------------
+
+results <- resamples(
+  list(
+    model_1  = rf_model_1,
+    model_2  = rf_model_2
+  )
+)
+summary(results)
+
+```
+
+Based on the RMSE, the more complex model provides better prediction. 
+
+## Model Diagnostics
+
+The variable importance plot shows which variables reduce the sample MSE the most. Our plot displays the top 10 variables. 
+Our other plot, the partial dependence plot shows the direction and shape of association of the number of accommodates with price.
+
+```{r, echo=FALSE, warning=FALSE}
+# PART III
+# MODEL DIAGNOSTICS -------------------------------------------------------
+#
+
+
+# Variable Importance Plots -------------------------------------------------------
+
+rf_model_2_var_imp <- ranger::importance(rf_model_2$finalModel)/1000
+rf_model_2_var_imp_df <-
+  data.frame(varname = names(rf_model_2_var_imp),imp = rf_model_2_var_imp) %>%
+  mutate(varname = gsub("f_neighbourhood_cleansed", "Borough:", varname) ) %>%
+  mutate(varname = gsub("f_room_type", "Room type:", varname) ) %>%
+  arrange(desc(imp)) %>%
+  mutate(imp_percentage = imp/sum(imp))
+
+# 1) full varimp plot, top 10 only
+
+# have a version with top 10 vars only
+ggplot(rf_model_2_var_imp_df[1:10,], aes(x=reorder(varname, imp), y=imp_percentage)) +
+  geom_point(color='red', size=1) +
+  geom_segment(aes(x=varname,xend=varname,y=0,yend=imp_percentage), color='red', size=0.75) +
+  ylab("Importance (Percent)") +
+  xlab("Variable Name") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal()
+
+# Partial Dependence Plots -------------------------------------------------------
+
+# 1) Number of accommodates
+pdp_n_acc <- pdp::partial(rf_model_2, pred.var = "n_accommodates", 
+                          pred.grid = distinct_(data_holdout, "n_accommodates"), 
+                          train = data_train)
+
+pdp_n_acc %>%
+  autoplot( ) +
+  geom_point(color='red', size=2) +
+  geom_line(color='red', size=1) +
+  ylab("Predicted price") +
+  xlab("Accommodates (persons)") +
+  scale_x_continuous(limit=c(1,7), breaks=seq(1,7,1))+
+  theme_minimal()
+
+```
+
+As the last step of the model diagnostics, we check the fit of the models on different subsets of the holdout data. The subsets inform us on the external validity of our prediction across groups represented by the subsamples. We compare the RMSE values relative to the corresponding mean predicted y.
+We use three subsamples, first we devide the data to small (apartments accommodating 3 or less people) and large apartments.
+With the second subsample we compare the performance of our model in six neighbourhoods.
+Lastly we do the same with two types of properties, entire rental units and entire condominiums.
+
+
+```{r subsample, echo = FALSE, warning=FALSE, fig.width=5, fig.height = 3, fig.align="center" }
+# Subsample performance: RMSE / mean(y) ---------------------------------------
+# NOTE  we do this on the holdout set.
+
+# ---- cheaper or more expensive flats - not used in book
+data_holdout_w_prediction <- data_holdout %>%
+  mutate(predicted_price = predict(rf_model_1, newdata = data_holdout))
+
+######### create nice summary table of heterogeneity
+a <- data_holdout_w_prediction %>%
+  mutate(is_low_size = ifelse(n_accommodates <= 3, "small apt", "large apt")) %>%
+  group_by(is_low_size) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+#data_holdout %>% count(neighbourhood_cleansed, sort = T)
+
+b <- data_holdout_w_prediction %>%
+  filter(neighbourhood_cleansed %in% c("Mission Bay", "East Village",
+                                         "Pacific Beach", "La Jolla",
+                                         "Midtown", "Ocean Beach")) %>%
+  group_by(neighbourhood_cleansed) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = rmse / mean_price
+  )
+
+c <- data_holdout_w_prediction %>%
+  filter(f_property_type %in% c("Entire rental unit", "Entire condominium (condo)")) %>%
+  group_by(f_property_type) %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = rmse / mean_price
+  )
+
+
+d <- data_holdout_w_prediction %>%
+  dplyr::summarise(
+    rmse = RMSE(predicted_price, price),
+    mean_price = mean(price),
+    rmse_norm = RMSE(predicted_price, price) / mean(price)
+  )
+
+# Save output
+colnames(a) <- c("", "RMSE", "Mean price", "RMSE/price")
+colnames(b) <- c("", "RMSE", "Mean price", "RMSE/price")
+colnames(c) <- c("", "RMSE", "Mean price", "RMSE/price")
+d<- cbind("All", d)
+colnames(d) <- c("", "RMSE", "Mean price", "RMSE/price")
+
+line1 <- c("Type", "", "", "")
+line2 <- c("Apartment size", "", "", "")
+line3 <- c("Neighbourhood", "", "", "")
+
+result_3 <- rbind(line2, a, line1, c, line3, b, d) %>%
+  transform(RMSE = as.numeric(RMSE), `Mean price` = as.numeric(`Mean price`),
+            `RMSE/price` = as.numeric(`RMSE/price`))
+
+#result_3
+
+kable( result_3,
+       "latex", booktabs = TRUE,  position = "H",
+       caption = 'Subsets') %>% kable_styling(latex_options = c("hold_position","scale_down"))
+```
+
+The RMSE/predicted price show similar predicting performance in case of apartment size and type, with slightly better performance in case of smaller apartments and rental unit compared to condos. However in case of the neighbourhoods we see more significant differences, which means that the prices are harder to predict there. Most likely because of the uneven number of observations. 
+
+## Comparing models
+
+Lastly let's compare the random forest models with the linear regression models and the regression tree (CART). The evaluation on the holdout set can be seen below (Results of other models and CART tree can be found in the appendix).
+
+```{r, echo = FALSE, warning=FALSE, fig.width=5, fig.height = 3, fig.align="center" }
+# PART IV
+# HORSERACE: compare with other models -----------------------------------------------
+
+# OLS with dummies for area
+# using model B
+
+set.seed(1337)
+system.time({
+  ols_model <- train(
+    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+    data = data_train,
+    method = "lm",
+    trControl = train_control
+  )
+})
+
+ols_model_coeffs <-  ols_model$finalModel$coefficients
+ols_model_coeffs_df <- data.frame(
+  "variable" = names(ols_model_coeffs),
+  "ols_coefficient" = ols_model_coeffs
+) %>%
+  mutate(variable = gsub("`","",variable))
+
+# * LASSO
+# using extended model w interactions
+
+set.seed(1337)
+system.time({
+  lasso_model <- train(
+    formula(paste0("price ~", paste0(predictors_E, collapse = " + "))),
+    data = data_train,
+    method = "glmnet",
+    preProcess = c("center", "scale"),
+    tuneGrid =  expand.grid("alpha" = 1, "lambda" = seq(0.01, 0.25, by = 0.01)),
+    trControl = train_control
+  )
+})
+
+lasso_coeffs <- coef(
+  lasso_model$finalModel,
+  lasso_model$bestTune$lambda) %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "variable") %>%
+  rename(lasso_coefficient = `s1`)  # the column has a name "1", to be renamed
+
+lasso_coeffs_non_null <- lasso_coeffs[!lasso_coeffs$lasso_coefficient == 0,]
+
+regression_coeffs <- merge(ols_model_coeffs_df, lasso_coeffs_non_null, by = "variable", all=TRUE)
+
+# CART with built-in pruning
+set.seed(1337)
+system.time({
+  cart_model <- train(
+    formula(paste0("price ~", paste0(predictors_2, collapse = " + "))),
+    data = data_train,
+    method = "rpart",
+    tuneLength = 10,
+    trControl = train_control
+  )
+})
+
+###
+# and get prediction rmse and add to next summary table
+# ---- compare these models
+
+final_models <-
+  list("OLS" = ols_model,
+       "LASSO (model w/ interactions)" = lasso_model,
+       "CART" = cart_model,
+       "Random forest 1: smaller model" = rf_model_1,
+       "Random forest 2: extended model" = rf_model_2)
+
+results <- resamples(final_models) %>% summary()
+
+# Model selection is carried out on this CV RMSE
+result_4 <- imap(final_models, ~{
+  mean(results$values[[paste0(.y,"~RMSE")]])
+}) %>% unlist() %>% as.data.frame() %>%
+  rename("CV RMSE" = ".")
+
+# evaluate preferred model on the holdout set -----------------------------
+
+result_5 <- map(final_models, ~{
+  RMSE(predict(.x, newdata = data_holdout), data_holdout[["price"]])
+}) %>% unlist() %>% as.data.frame() %>%
+  rename("Holdout RMSE" = ".")
+
+result_5
+```
+
+## Conclusion
+
+Evaluating the models on the holdout set, we see that the best performer based on the RMSE is the more complex random forest model, followed by the simpler random forest model. Meanwhile the worst performer is the OLS model, which could suggest, that nonlinear functional forms and interactions could be important for the prediction. On the other hand the LASSO with interactions performed very similarly to the OLS, but it might be because the interactions weren't the right ones. 
+
+
+## Appendix
+
+Datasummary for Price
+```{r, echo=F}
+datasummary(price~Mean+Median+Min+Max+P25+P75+N,data=data)
+```
+
+Summary table of the RF models
+
+```{r, echo=F}
+summary(results)
+```
+
+Dimensions of the train and holdout sets
+
+```{r, echo=F}
+dim(data_train)
+dim(data_holdout)
+```
+
+Variables, interactions and predictors
+
+```{r, echo=F}
+# Basic Variables inc neighnourhood
+basic_vars
+
+# reviews
+reviews
+
+# Dummy variables
+amenities
+
+#interactions for the LASSO -------------
+# from ch14
+X1
+# with boroughs
+X2
+
+predictors_1 <- c(basic_vars)
+predictors_2 <- c(basic_vars, reviews, amenities)
+predictors_E <- c(basic_vars, reviews, amenities, X1,X2)
+```
+
+Comparing models
+
+```{r, echo=F}
+cart_model
+# Showing an alternative for plotting a tree
+fancyRpartPlot(cart_model$finalModel, sub = "")
+
+results
+result_4
+
+```
+
